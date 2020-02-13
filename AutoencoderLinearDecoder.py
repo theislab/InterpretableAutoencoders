@@ -172,10 +172,13 @@ def train_autoencoder(adata, autoencoder, lr, batch_size, num_epochs,
     
     optimizer = optim(autoencoder.parameters(), lr=lr, **kwargs)
     
-    n_inact_genes = (1-adata.varm['I']).sum()
+    I = adata.varm['I']
     
-    prox_ops = get_prox_operators(torch.from_numpy(adata.varm['I']), 
-                                  lambda1, lambda2, lambda3)
+    n_inact_genes = (1-I).sum()
+    
+    I = torch.from_numpy(I)
+    
+    prox_ops = get_prox_operators(I, lambda1, lambda2, lambda3)
     
     term_keys = autoencoder.decoder.weight_dict.keys()
     for k in term_keys:
@@ -226,5 +229,5 @@ def train_autoencoder(adata, autoencoder, lr, batch_size, num_epochs,
         n_deact_terms = autoencoder.decoder.n_inactive_terms()
         print('Number of deactivated terms:', n_deact_terms)
 
-        n_deact_genes = (~(autoencoder.decoder.weight_dict[TERMS_KEYS[0]].data.abs()>0)).float().sum().numpy()
+        n_deact_genes = (~(autoencoder.decoder.weight_dict[TERMS_KEYS[0]].data.abs()>0)&~I.bool()).float().sum().numpy()
         print('Share of deactivated inactive genes: %.4f' % (n_deact_genes/n_inact_genes))
