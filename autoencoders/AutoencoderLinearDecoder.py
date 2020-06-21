@@ -166,6 +166,11 @@ def get_prox_operators(I, lambda1, lambda2, lambda3):
     
     return ops_dct
 
+def index_iter(n_obs, batch_size):
+    indices = np.random.permutation(n_obs)
+    for i in range(0, n_obs, batch_size):
+        yield indices[i: min(i + batch_size, n_obs)]
+
 def train_autoencoder(adata, autoencoder, lr, batch_size, num_epochs, 
                       l2_reg_lambda0=0.1, lambda1=None, lambda2=None, lambda3=None,
                       test_data=None, optim = torch.optim.Adam, **kwargs):
@@ -193,19 +198,23 @@ def train_autoencoder(adata, autoencoder, lr, batch_size, num_epochs,
         comment = '-- test loss:'
     test_n_obs = t_X.shape[0]
 
-    zeros = torch.zeros((batch_size, autoencoder.n_terms))
-
     l2_loss = nn.MSELoss(reduction='sum')
+    
+    if adata.isbacked:
+        select_X = lambda adata, selection: torch.from_numpy(adata[selection].X)
+    else:
+        select_X = lambda adata, selection: torch.from_numpy(adata.X[selection])
 
     for epoch in range(num_epochs):
         autoencoder.train()
 
-        for step in range(int(adata.n_obs/batch_size)):
-            X = torch.from_numpy(adata.chunk_X(batch_size))
+        for step, selection in enumerate(index_iter(adata.n_obs, batch_size)):
+
+            X = select_X(adata, selection)
 
             encoded, decoded = autoencoder(X)
 
-            loss = (l2_loss(decoded, X)+l2_reg_lambda0*l2_loss(encoded, zeros))/batch_size
+            loss = (l2_loss(decoded, X)+l2_reg_lambda0*encoded.pow(2).sum())/len(selection)
 
             optimizer.zero_grad()
             loss.backward()
@@ -221,7 +230,7 @@ def train_autoencoder(adata, autoencoder, lr, batch_size, num_epochs,
         t_encoded, t_decoded = autoencoder(t_X)
 
         t_reconst = l2_loss(t_decoded, t_X).data.numpy()/test_n_obs
-        t_regul = l2_reg_lambda0*l2_loss(t_encoded, torch.zeros_like(t_encoded)).data.numpy()/test_n_obs
+        t_regul = l2_reg_lambda0*t_encoded.pow(2).sum().data.numpy()/test_n_obs
         t_loss = t_reconst + t_regul
 
         print('Epoch:', epoch, comment, '%.4f=%.4f+%.4f' % (t_loss, t_reconst, t_regul))
